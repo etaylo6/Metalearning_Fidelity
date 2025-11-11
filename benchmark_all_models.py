@@ -28,6 +28,7 @@ from beam_config import TRAINING_BOUNDS, EXTRAPOLATION_BOUNDS, DATA_CONFIG, MODE
 from data_generator import generate_samples, calculate_combinatorial_accuracy, prepare_accuracy_data
 
 # Import model training functions
+from gam_main_effects import fit_gam_model
 from gam2_tensor_interactions import fit_gam2_model
 from nn_simple_feature_vector import fit_simple_neural_network
 from nn_input_gated import fit_gated_neural_network
@@ -40,6 +41,11 @@ from nn_conditional_heads import fit_conditional_neural_network
 # ============================================================================
 
 MODELS = {
+    'GAM': {
+        'name': 'GAM with Main Effects Only',
+        'fit_function': fit_gam_model,
+        'needs_feature_combinations': False
+    },
     'GAM2': {
         'name': 'GAM² with Tensor Interactions',
         'fit_function': fit_gam2_model,

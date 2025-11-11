@@ -1,22 +1,21 @@
 """
-ACCURACY SURROGATE MODEL: GAM^2 WITH TENSOR PRODUCT INTERACTIONS
-================================================================
+ACCURACY SURROGATE MODEL: GAM WITH MAIN EFFECTS ONLY
+=====================================================
 
-This module implements a Generalized Additive Model with tensor product interactions (GAM^2)
-for predicting model accuracy in combinatorial fidelity assessment.
+This module implements a Generalized Additive Model (GAM) with main effects only
+(no interactions) for predicting model accuracy in combinatorial fidelity assessment.
 
 Architecture:
-- Uses pygam library for GAM^2 implementation
+- Uses pygam library for GAM implementation
 - Main effects: Smooth splines for continuous features, linear terms for binary features
-- Interactions: Tensor product interactions between features (first-level)
-- Smart interaction selection based on feature importance
+- No interactions: Only individual feature effects (simpler than GAM²)
 - Regularization tuning via grid search
 - Handles mixed continuous and binary features appropriately
 
 Key Features:
-1. Tensor product interactions for capturing feature interactions
-2. Automatic selection of important interactions based on correlation
-3. Different treatment for continuous vs binary features
+1. Main effects only: Each feature contributes independently (no interactions)
+2. Smooth splines for continuous parameters
+3. Linear terms for binary features
 4. Regularization tuning to prevent overfitting
 5. Bounded predictions in [0, 1] range for accuracy scores
 
@@ -45,13 +44,13 @@ from beam_config import TRAINING_BOUNDS, EXTRAPOLATION_BOUNDS, DATA_CONFIG, MODE
 from data_generator import generate_samples, calculate_combinatorial_accuracy, prepare_accuracy_data
 from model_evaluation import plot_combinatorial_accuracy_surrogate_performance, log_training_testing_data
 
-# Import pygam for GAM^2
+# Import pygam for GAM
 try:
-    from pygam import LinearGAM, s, te, f, l
-    PYGAN_AVAILABLE = True
-    print("GAM^2: Using pygam for Generalized Additive Model with tensor product interactions")
+    from pygam import LinearGAM, s, l
+    PYGAM_AVAILABLE = True
+    print("GAM: Using pygam for Generalized Additive Model with main effects only")
 except ImportError:
-    raise ImportError("pygam is required for GAM^2. Install with: pip install pygam")
+    raise ImportError("pygam is required for GAM. Install with: pip install pygam")
 
 # ============================================================================
 # NUMPY-BASED UTILITIES (sklearn-free)
@@ -81,68 +80,32 @@ class StandardScaler:
         """Fit and transform in one step"""
         return self.fit(X).transform(X)
 
-
 # ============================================================================
-# GAM^2 CONFIGURATION
+# GAM CONFIGURATION
 # ============================================================================
 
 CONFIG = {
     'random_seed': DATA_CONFIG['random_seed'],
     
-    # GAM^2 Configuration
+    # GAM Configuration (main effects only)
     'gam_n_splines': 10,              # Number of splines per feature
     'gam_spline_order': 3,            # Spline order (cubic)
     'gam_fit_intercept': True,        # Fit intercept
     'gam_max_iter': 1000,             # Maximum iterations
     'gam_tol': 1e-4,                  # Convergence tolerance
     'gam_link': 'identity',           # Link function (identity for continuous output)
-    'gam_interactions': True,         # Include first-level interactions
-    'gam_interaction_terms': None,    # Specific interactions (None = smart selection)
-    'gam_max_interactions': 35,       # Maximum number of interaction terms (increased)
     'gam_tune_regularization': True,  # Use grid search for regularization tuning
-    'gam_lam_range': np.logspace(-3, 1, 8),  # Regularization range for tuning (reduced for speed)
+    'gam_lam_range': np.logspace(-3, 1, 8),  # Regularization range for tuning
     'gam_cv_folds': 3,                # Cross-validation folds for tuning
 }
 
 # ============================================================================
-# GAM^2 MODEL FUNCTIONS
+# GAM MODEL FUNCTIONS
 # ============================================================================
 
-def select_important_interactions(X_scaled, y, n_features, max_interactions, n_splines):
+def fit_gam_model(X, y):
     """
-    Select important interaction terms using a quick correlation/importance-based approach.
-    
-    Args:
-        X_scaled: Scaled input features
-        y: Target values
-        n_features: Number of features
-        max_interactions: Maximum number of interactions to select
-        n_splines: Number of splines for terms
-    
-    Returns:
-        List of (i, j) tuples for selected interactions
-    """
-    # Quick feature importance using simple linear correlation
-    correlations = np.abs([np.corrcoef(X_scaled[:, i], y)[0, 1] for i in range(n_features)])
-    
-    # Score interaction pairs based on both features' importance
-    interaction_scores = []
-    for i in range(n_features):
-        for j in range(i+1, n_features):
-            # Score: product of feature importances
-            score = correlations[i] * correlations[j]
-            interaction_scores.append((score, (i, j)))
-    
-    # Sort by score and select top interactions
-    interaction_scores.sort(reverse=True)
-    selected = [pair for _, pair in interaction_scores[:max_interactions]]
-    
-    return selected
-
-def fit_gam2_model(X, y):
-    """
-    Fit a Generalized Additive Model with first-level interactions (GAM^2)
-    with improved binary feature handling, smart interaction selection, and regularization tuning.
+    Fit a Generalized Additive Model (GAM) with main effects only (no interactions).
     
     Args:
         X: Input features (n_samples, n_features)
@@ -157,8 +120,8 @@ def fit_gam2_model(X, y):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # Use pygam for true GAM^2 (Generalized Additive Model with tensor product interactions)
-    print(f"Fitting GAM^2 model using pygam...")
+    # Use pygam for GAM (Generalized Additive Model with main effects only)
+    print(f"Fitting GAM model (main effects only) using pygam...")
     n_features = X_scaled.shape[1]
     n_splines = CONFIG['gam_n_splines']
     
@@ -169,7 +132,7 @@ def fit_gam2_model(X, y):
     continuous_features = list(range(n_features - n_binary_features))
     binary_features = list(range(n_features - n_binary_features, n_features))
     
-    # Build GAM formula with main effects
+    # Build GAM formula with main effects only (no interactions)
     # For continuous features: use smooth splines
     # For binary features: use linear terms
     
@@ -185,46 +148,8 @@ def fit_gam2_model(X, y):
         # Use linear term for binary features - they don't need smoothing
         combined_terms = combined_terms + l(i)
     
-    # First-level interactions: smart selection
-    interaction_count = 0
-    if CONFIG['gam_interactions']:
-        if CONFIG['gam_interaction_terms'] is None:
-            # Smart selection: use importance-based selection
-            max_interactions = CONFIG.get('gam_max_interactions', 35)
-            total_possible = n_features * (n_features - 1) // 2
-            
-            # Select important interactions
-            selected_interactions = select_important_interactions(X_scaled, y, n_features, max_interactions, n_splines)
-            
-            # Add selected interactions
-            for i, j in selected_interactions:
-                # Use tensor product for continuous-continuous interactions
-                if i in continuous_features and j in continuous_features:
-                    combined_terms = combined_terms + te(i, j, n_splines=[n_splines, n_splines], 
-                                                       spline_order=[CONFIG['gam_spline_order'], CONFIG['gam_spline_order']])
-                # Use smooth by factor for binary-continuous interactions
-                elif (i in binary_features and j in continuous_features) or (j in binary_features and i in continuous_features):
-                    # Smooth term for continuous feature modulated by binary factor
-                    cont_idx = j if i in binary_features else i
-                    bin_idx = i if i in binary_features else j
-                    combined_terms = combined_terms + te(bin_idx, cont_idx, n_splines=[2, n_splines],
-                                                       spline_order=[1, CONFIG['gam_spline_order']])
-                # Interaction for binary-binary (use tensor with 2 splines for binary)
-                else:
-                    # Use tensor product with n_splines=2 for binary features
-                    combined_terms = combined_terms + te(i, j, n_splines=[2, 2],
-                                                       spline_order=[1, 1])
-                
-                interaction_count += 1
-            
-            if interaction_count < total_possible:
-                print(f"  Note: Using {interaction_count} interaction terms (out of {total_possible} possible) based on importance")
-        else:
-            # Use specified interaction pairs
-            for i, j in CONFIG['gam_interaction_terms']:
-                combined_terms = combined_terms + te(i, j, n_splines=[n_splines, n_splines],
-                                                   spline_order=[CONFIG['gam_spline_order'], CONFIG['gam_spline_order']])
-                interaction_count += 1
+    print(f"  Model terms: {len(continuous_features)} smooth splines + {len(binary_features)} linear terms")
+    print(f"  Total features: {n_features} (no interactions)")
     
     # Create base GAM model
     gam_base = LinearGAM(terms=combined_terms, max_iter=CONFIG['gam_max_iter'], tol=CONFIG['gam_tol'])
@@ -276,9 +201,9 @@ def fit_gam2_model(X, y):
 # ============================================================================
 
 def main():
-    """Run accuracy surrogate analysis with GAM^2"""
+    """Run accuracy surrogate analysis with GAM"""
     print("="*60)
-    print("BEAM MODEL ACCURACY SURROGATE ANALYSIS - GAM^2")
+    print("BEAM MODEL ACCURACY SURROGATE ANALYSIS - GAM")
     print("="*60)
     
     # Generate samples using shared data generator
@@ -307,7 +232,7 @@ def main():
     )
     
     # Calculate accuracy for all combinations using shared function
-    print("Building combinatorial accuracy surrogate model with GAM^2...")
+    print("Building combinatorial accuracy surrogate model with GAM...")
     print("Feature vector: [temperature_enabled, shear_enabled]")
     print("Combinations: [1,1]=Full, [1,0]=EB+Temp, [0,1]=EB+Shear, [0,0]=Euler-Bernoulli")
     
@@ -325,9 +250,9 @@ def main():
         X_samples, combinatorial_results, param_names
     )
     
-    # Fit GAM^2 surrogate for combinatorial accuracy prediction
-    print(f"Fitting GAM^2 surrogate with main effects and first-level interactions...")
-    gam2_combinatorial = fit_gam2_model(X_combined, y_combined)
+    # Fit GAM surrogate for combinatorial accuracy prediction (main effects only)
+    print(f"Fitting GAM surrogate with main effects only (no interactions)...")
+    gam_combinatorial = fit_gam_model(X_combined, y_combined)
     
     # Calculate test results for evaluation and logging
     print("\nCalculating test results for evaluation...")
@@ -342,8 +267,8 @@ def main():
     
     # Plot combinatorial accuracy surrogate performance
     combinatorial_performance = plot_combinatorial_accuracy_surrogate_performance(
-        gam2_combinatorial, X_combined, y_combined, combination_labels, X_test, y_test_results,
-        model_name="GAM²"
+        gam_combinatorial, X_combined, y_combined, combination_labels, X_test, y_test_results, 
+        model_name="GAM"
     )
     
     # Log all training and testing data
@@ -354,15 +279,15 @@ def main():
         X_combined=X_combined,
         y_combined=y_combined,
         combination_labels=combination_labels,
-        model=gam2_combinatorial,
+        model=gam_combinatorial,
         X_test=X_test,
         y_test_results=y_test_results,
         param_names=param_names,
         output_dir='logs',
-        model_name="GAM²"
+        model_name="GAM"
     )
     
-    print("\nGAM^2 accuracy analysis complete!")
+    print("\nGAM accuracy analysis complete!")
     print("\nLog files created:")
     print(f"  - Training data: {log_results['training_file']}")
     print(f"  - Testing data: {log_results['testing_file']}")

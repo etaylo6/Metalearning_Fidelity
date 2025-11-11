@@ -81,6 +81,19 @@ MODEL_CONFIG = {
 # MODEL-SPECIFIC CONFIGURATIONS
 # ============================================================================
 
+# GAM Configuration (Main Effects Only)
+GAM_CONFIG = {
+    'gam_n_splines': 10,              # Number of splines per feature
+    'gam_spline_order': 3,            # Spline order (cubic)
+    'gam_fit_intercept': True,        # Fit intercept
+    'gam_max_iter': 1000,             # Maximum iterations
+    'gam_tol': 1e-4,                  # Convergence tolerance
+    'gam_link': 'identity',           # Link function (identity for continuous output)
+    'gam_tune_regularization': True,  # Use grid search for regularization tuning
+    'gam_lam_range': np.logspace(-3, 1, 8),  # Regularization range for tuning
+    'gam_cv_folds': 3,                # Cross-validation folds for tuning
+}
+
 # GAM^2 Configuration
 GAM2_CONFIG = {
     'gam_n_splines': 10,              # Number of splines per feature

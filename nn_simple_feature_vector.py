@@ -34,8 +34,6 @@ To run this script:
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
@@ -46,6 +44,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from beam_physics import beam_displacement_with_features
 from beam_config import TRAINING_BOUNDS, EXTRAPOLATION_BOUNDS, DATA_CONFIG, MODEL_CONFIG, NN_FEATURE_VECTOR_CONFIG
 from data_generator import generate_samples, calculate_combinatorial_accuracy, prepare_accuracy_data
+from model_evaluation import plot_combinatorial_accuracy_surrogate_performance
 
 # Consolidate configuration
 CONFIG = {**DATA_CONFIG, **NN_FEATURE_VECTOR_CONFIG}
@@ -185,163 +184,6 @@ def fit_simple_neural_network(X, y):
     return SimpleNNWrapper(model, scaler)
 
 # ============================================================================
-# VISUALIZATION
-# ============================================================================
-
-def plot_combinatorial_accuracy_surrogate_performance(model, X_combined, y_combined, 
-                                                       combination_labels, X_test, 
-                                                       y_test_results):
-    """Plot Simple Neural Network combinatorial accuracy surrogate model performance with extrapolation testing"""
-    
-    # Get the actual combinations that were used (excluding reference)
-    unique_combinations = np.unique(X_combined[:, -2:], axis=0)
-    combination_names = []
-    
-    for combo in unique_combinations:
-        if np.array_equal(combo, [1, 0]):
-            combination_names.append('EB + Temp [1,0]')
-        elif np.array_equal(combo, [0, 1]):
-            combination_names.append('EB + Shear [0,1]')
-        elif np.array_equal(combo, [0, 0]):
-            combination_names.append('Euler-Bernoulli [0,0]')
-    
-    colors = ['red', 'green', 'purple']
-    
-    # Create subplot grid - 1 column per combination
-    n_combinations = len(unique_combinations)
-    n_cols = n_combinations
-    n_rows = 2 if n_combinations > 2 else 1
-    
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 8*n_rows))
-    if n_rows == 1:
-        axes = axes.reshape(1, -1)
-    
-    axes = axes.flatten()
-    
-    # Optimize layout for better snipping/screenshots
-    plt.rcParams['figure.autolayout'] = True
-    
-    for i, (combo, name, color) in enumerate(zip(unique_combinations, combination_names, colors)):
-        ax = axes[i]
-        
-        # Get data for this combination
-        mask = np.all(X_combined[:, -2:] == combo, axis=1)
-        X_combo = X_combined[mask]
-        y_combo = y_combined[mask]
-        
-        if len(X_combo) == 0:
-            continue
-        
-        # Extrapolation testing setup
-        X_test_extended = np.column_stack([X_test, np.tile(combo, (len(X_test), 1))])
-        
-        # Find the combination name for this combo
-        combo_name = None
-        for name_check, data in y_test_results.items():
-            if np.array_equal(data['combination'], combo):
-                combo_name = name_check
-                break
-        
-        # Simple Neural Network predictions
-        y_pred_train = model.predict(X_combo)
-        r2_train = r2_score(y_combo, y_pred_train)
-        
-        ax.scatter(y_combo, y_pred_train, alpha=0.6, color='black', s=30, label='Training')
-        
-        if combo_name is not None:
-            y_test_combo = 1 - y_test_results[combo_name]['relative_error']  # Convert to accuracy scores
-            y_pred_test = model.predict(X_test_extended)
-            r2_test = r2_score(y_test_combo, y_pred_test)
-            ax.scatter(y_test_combo, y_pred_test, alpha=0.6, color=color, s=50, 
-                      marker='^', label='Extrapolation')
-        else:
-            r2_test = np.nan
-            y_test_combo = None
-        
-        # Perfect prediction line
-        all_true = np.concatenate([y_combo, y_test_combo if y_test_combo is not None else []])
-        all_pred = np.concatenate([y_pred_train, y_pred_test if not np.isnan(r2_test) else []])
-        min_val = min(np.min(all_true), np.min(all_pred))
-        max_val = max(np.max(all_true), np.max(all_pred))
-        ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8)
-        
-        ax.set_xlabel('True Accuracy Score')
-        ax.set_ylabel('Predicted Accuracy Score')
-        title = f'{name} - Simple NN\nTrain R² = {r2_train:.4f}'
-        if not np.isnan(r2_test):
-            title += f', Extrap R² = {r2_test:.4f}'
-        ax.set_title(title)
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-    
-    # Remove empty subplots
-    for i in range(n_combinations, len(axes)):
-        axes[i].remove()
-    
-    # Improve layout for better snipping
-    plt.tight_layout(pad=2.0)
-    plt.subplots_adjust(top=0.95, bottom=0.1, left=0.08, right=0.98, hspace=0.3, wspace=0.3)
-    plt.show()
-    
-    # Summary statistics
-    print("\n" + "="*70)
-    print("SIMPLE NEURAL NETWORK (FEATURE VECTOR) - SURROGATE PERFORMANCE")
-    print("="*70)
-    
-    for i, (combo, name) in enumerate(zip(unique_combinations, combination_names)):
-        mask = np.all(X_combined[:, -2:] == combo, axis=1)
-        X_combo = X_combined[mask]
-        y_combo = y_combined[mask]
-        
-        if len(X_combo) == 0:
-            continue
-            
-        # Training performance
-        y_pred_train = model.predict(X_combo)
-        r2_train = r2_score(y_combo, y_pred_train)
-        mse_train = mean_squared_error(y_combo, y_pred_train)
-        
-        # Extrapolation performance
-        X_test_extended = np.column_stack([X_test, np.tile(combo, (len(X_test), 1))])
-        
-        # Find the combination name for this combo
-        combo_name = None
-        for name_check, data in y_test_results.items():
-            if np.array_equal(data['combination'], combo):
-                combo_name = name_check
-                break
-        
-        if combo_name is not None:
-            y_test_combo = 1 - y_test_results[combo_name]['relative_error']  # Convert to accuracy scores
-            y_pred_test = model.predict(X_test_extended)
-            r2_test = r2_score(y_test_combo, y_pred_test)
-            mse_test = mean_squared_error(y_test_combo, y_pred_test)
-            degradation = r2_train - r2_test
-        else:
-            r2_test = np.nan
-            mse_test = np.nan
-            degradation = np.nan
-        
-        print(f"{name}:")
-        print(f"  Training R²: {r2_train:.4f}")
-        if not np.isnan(r2_test):
-            print(f"  Extrapolation R²: {r2_test:.4f}")
-            print(f"  Degradation: {degradation:.4f}")
-        print(f"  Training MSE: {mse_train:.6f}")
-        if not np.isnan(mse_test):
-            print(f"  Extrapolation MSE: {mse_test:.6f}")
-        print(f"  Accuracy Range: [{np.min(y_combo):.4f}, {np.max(y_combo):.4f}]")
-        print()
-    
-    return {
-        'combinations': unique_combinations.tolist(),
-        'combination_names': combination_names,
-        'performance': {name: r2_score(y_combined[np.all(X_combined[:, -2:] == combo, axis=1)], 
-                                      model.predict(X_combined[np.all(X_combined[:, -2:] == combo, axis=1)]))
-                       for combo, name in zip(unique_combinations, combination_names) if len(X_combined[np.all(X_combined[:, -2:] == combo, axis=1)]) > 0}
-    }
-
-# ============================================================================
 # MAIN ANALYSIS
 # ============================================================================
 
@@ -399,9 +241,21 @@ def main():
     print(f"Fitting Simple Neural Network surrogate with feature vector approach...")
     simple_nn_combinatorial = fit_simple_neural_network(X_combined, y_combined)
     
+    # Calculate test results for evaluation
+    print("\nCalculating test results for evaluation...")
+    y_test_results = calculate_combinatorial_accuracy(
+        X_test,
+        beam_displacement_with_features,
+        param_names,
+        MODEL_CONFIG['feature_combinations'],
+        MODEL_CONFIG['reference_features'],
+        MODEL_CONFIG['combination_names']
+    )
+    
     # Plot combinatorial accuracy surrogate performance
     combinatorial_performance = plot_combinatorial_accuracy_surrogate_performance(
-        simple_nn_combinatorial, X_combined, y_combined, combination_labels, X_test, combinatorial_results
+        simple_nn_combinatorial, X_combined, y_combined, combination_labels, X_test, y_test_results,
+        model_name="Simple Neural Network"
     )
     
     print("\nAccuracy analysis complete!")
